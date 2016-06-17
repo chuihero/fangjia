@@ -3,36 +3,130 @@
 
 import httplib2
 from bs4 import BeautifulSoup
+import time
+from multiprocessing.pool import ThreadPool
 
-
+MAXRETRYTIMES = 5
 class Lianjia():
 
-    def __init__(self,url):
-        self.entrance = url
+
+    def __init__(self,region = 'tongzhou'):
+        self.url = 'http://bj.lianjia.com/ershoufang/{}/pg{}/'
+        self.regions = ['dongcheng','xicheng','chaoyang','haidian','fengtai','shijingshan','tongzhou',\
+                       'changping','daxing','yizhuangkaifaqu','shunyi','fangshan','mentougou','pinggu',\
+                       'huairou','miyun','yanqing','yanjiao']
+
+        assert region in self.regions, '北京无此地区!'
+
+        self.chosenRegion = region
 
         # header = {'user-agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) Apple    WebKit/537.36 (KHTML, like Gecko) Chrome/42.0.2311.152 Safari/537.36'}
-        self.h = httplib2.Http('.cache')
+        self.h = httplib2.Http()
 
-    def getPage(self):
+
+    def getHouseUrlInPage(self,url):
         header = {\
             'user-agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) Apple    WebKit/537.36 (KHTML, like Gecko) Chrome/42.0.2311.152 Safari/537.36'}
-        resp,cont = self.h.request(self.entrance,headers=header)
+        resp,cont = self.h.request(url,headers=header)
 
+        houseUrlList = []
         if resp.status == 200:
             html = cont.decode('utf8')
-            fh = open('main.html','w')
-            fh.writelines(html)
-            fh.close()
 
             soup = BeautifulSoup(html, 'html.parser')
+            try:
+                res = soup.find('ul',class_='listContent').find_all('a',class_='img')
+            except:
+                print('url {} 无房源信息'.format(url))
+                return []
 
-            houses = soup.find_all('li',class_='listContent')
+            for line  in res:
+                houseUrlList.append(line['href'])
 
-        pass;
+        return houseUrlList
+
+    def getAllHouseUrls(self):
+
+        houseUrls = []
+        i = 1
+        while True:
+            print('trying parse page {}!'.format(i))
+            res = self.getHouseUrlInPage(self.url.format(self.chosenRegion,i))
+            if len(res ) == 0:
+                break
+            houseUrls.extend(res)
+            i+=1
+
+        return houseUrls
+
+    def getAllHouseInfo(self):
+
+        houseUrls = self.getAllHouseUrls()
+        houseUrls = list(set(houseUrls))
+
+        pool = ThreadPool(10)
+        res = pool.map(self.parseHouseInfo, houseUrls)
+
+        print('end')
+        print(res)
+
+    def parseHouseInfo(self,houseUrl):
+        header = { \
+            'user-agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) Apple    WebKit/537.36 (KHTML, like Gecko) Chrome/42.0.2311.152 Safari/537.36'}
+        h = httplib2.Http()
+
+        for i in range(MAXRETRYTIMES-1):
+            resp, cont = h.request(houseUrl, headers=header)
+
+            if  resp.status == 200:
+                break
+            else:
+                time.sleep(5)
+
+        if not resp.status == 200:
+            print('无法获取{}的房源信息'.format(houseUrl))
+
+        html = cont.decode('utf8')
+        soup = BeautifulSoup(html, 'html.parser')
+
+        try:
+
+            totalPrice = float(soup.find('div',class_='price').find('span',class_='total').text)
+            unitPriceText =(soup.find('div',class_='unitPrice')).span.get_text(' ')
+            unitPrice = float((unitPriceText.split())[0])
+
+            title = soup.find('div',class_='title').text
+            room = soup.find('div',class_='room').find('div',class_='mainInfo').text
+
+            layer = soup.find('div',class_='room').find('div',class_='subInfo').text
+
+            area = soup.find('div',class_='area').find('div',class_='mainInfo').text
+            build = soup.find('div',class_='area').find('div',class_='subInfo').text
+            communityName = soup.find('div',class_='communityName').find('a').text
+            region = soup.find('div',class_='areaName').find('span',class_='info').get_text(',')
+
+            houseId = soup.find('div',class_='houseRecord').find('span',class_='info').get_text(',').split()[0]
+
+            return [totalPrice,unitPrice,title,room,layer,area,build,communityName,\
+                    region,houseId]
+        except:
+            print('网页{}解析错误'.format(houseUrl))
+
+
+
+
+
+
+
+
 
 
 if __name__ == '__main__':
 
-    url = 'http://bj.lianjia.com/ershoufang/rs%E9%80%9A%E5%B7%9E'
-    lianjia = Lianjia(url)
-    lianjia.getPage()
+    # url = 'http://bj.lianjia.com/ershoufang/rs%E9%80%9A%E5%B7%9E'
+    # url = 'http://bj.lianjia.com/ershoufang/pg92rs%E9%80%9A%E5%B7%9E/'
+    lianjia = Lianjia('tongzhou')
+    # a = lianjia.parseHouseInfo('http://bj.lianjia.com/ershoufang/101092222554.html')
+    lianjia.getAllHouseInfo()
+
+
