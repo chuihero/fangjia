@@ -4,7 +4,9 @@
 import httplib2
 from bs4 import BeautifulSoup
 import time
+import os
 from multiprocessing.pool import ThreadPool
+import pymysql
 
 MAXRETRYTIMES = 5
 class Lianjia():
@@ -108,9 +110,29 @@ class Lianjia():
             houseId = soup.find('div',class_='houseRecord').find('span',class_='info').get_text(',').split()[0]
 
             return [totalPrice,unitPrice,title,room,layer,area,build,communityName,\
-                    region,houseId]
+                    region,houseId,houseUrl]
         except:
+
+
+            filename = os.path.join('error',houseUrl[-17:-5]+'.html')
+            fh = open(filename,'w')
+            fh.writelines(soup.prettify())
+            fh.close
             print('网页{}解析错误'.format(houseUrl))
+
+
+
+class LianjiaSql(Lianjia):
+    def __init__(self,region = 'tongzhou',ip= '127.0.0.1',usr='root', psw='worship',char='utf8'):
+        super(Lianjia,self).__init__(region)
+        try:
+            self.conn = pymysql.connect(host=ip,user=usr,password=psw,charset=char)
+        except:
+            print('无法连接数据库！')
+
+        self.cur = self.conn.cursor()
+
+
 
 
 
@@ -126,7 +148,7 @@ if __name__ == '__main__':
     # url = 'http://bj.lianjia.com/ershoufang/rs%E9%80%9A%E5%B7%9E'
     # url = 'http://bj.lianjia.com/ershoufang/pg92rs%E9%80%9A%E5%B7%9E/'
     lianjia = Lianjia('tongzhou')
-    # a = lianjia.parseHouseInfo('http://bj.lianjia.com/ershoufang/101092222554.html')
-    lianjia.getAllHouseInfo()
+    a = lianjia.parseHouseInfo('http://bj.lianjia.com/ershoufang/101092222554.html')
+    # lianjia.getAllHouseInfo()
 
 
