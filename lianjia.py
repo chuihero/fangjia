@@ -3,12 +3,13 @@
 
 import httplib2
 from bs4 import BeautifulSoup
-import time
+import time,datetime
 import os
 from multiprocessing.pool import ThreadPool
 import pymysql
 
 MAXRETRYTIMES = 5
+THREADNUM = 20
 class Lianjia():
 
 
@@ -66,11 +67,10 @@ class Lianjia():
         houseUrls = self.getAllHouseUrls()
         houseUrls = list(set(houseUrls))
 
-        pool = ThreadPool(10)
+        pool = ThreadPool(THREADNUM)
         res = pool.map(self.parseHouseInfo, houseUrls)
 
-        print('end')
-        print(res)
+        return  res
 
     def parseHouseInfo(self,houseUrl):
         header = { \
@@ -107,10 +107,13 @@ class Lianjia():
             communityName = soup.find('div',class_='communityName').find('a').text
             region = soup.find('div',class_='areaName').find('span',class_='info').get_text(',')
 
-            houseId = soup.find('div',class_='houseRecord').find('span',class_='info').get_text(',').split()[0]
+            houseId = int(soup.find('div',class_='houseRecord').find('span',class_='info').get_text(',').split()[0])
 
-            return [totalPrice,unitPrice,title,room,layer,area,build,communityName,\
-                    region,houseId,houseUrl]
+            # return [totalPrice,unitPrice,title,room,layer,area,build,communityName,\
+            #         region,houseId,houseUrl]
+            return {'total':totalPrice,'unit':unitPrice,'title':title,'room':room,'layer':layer,\
+                    'area':area,'build':build,'community':communityName,'region':region,\
+                    'id':houseId,'url':houseUrl}
         except:
 
 
@@ -120,17 +123,120 @@ class Lianjia():
             fh.close
             print('网页{}解析错误'.format(houseUrl))
 
+    def writeHouseInfo(self,export='json'):
+        pass;
+
 
 
 class LianjiaSql(Lianjia):
+    DATABASE = 'house'
+    BASICTABLENAME = 'info'
+    PRICETABLENAME = 'price'
     def __init__(self,region = 'tongzhou',ip= '127.0.0.1',usr='root', psw='worship',char='utf8'):
-        super(Lianjia,self).__init__(region)
+        super(LianjiaSql,self).__init__(region)
         try:
             self.conn = pymysql.connect(host=ip,user=usr,password=psw,charset=char)
         except:
             print('无法连接数据库！')
 
         self.cur = self.conn.cursor()
+
+        if not self.isDatabaseExist():
+            s = 'create database {}'.format(self.DATABASE)
+            self.cur.execute(s)
+
+        s = 'use {}'.format(self.DATABASE)
+        self.cur.execute(s)
+        self.initTables()
+
+
+
+    def isDatabaseExist(self):
+        s = 'show databases'
+        self.cur.execute(s)
+        res = self.cur.fetchall()
+        if (self.DATABASE,) not in res:
+            return False
+        else:
+            return True
+    def initTables(self):
+        s = 'show tables'
+        self.cur.execute(s)
+        res = self.cur.fetchall()
+        if (self.BASICTABLENAME,) not in res:
+            # create basic table
+            s = '''create table {} (
+                                id BIGINT PRIMARY KEY NOT NULL,
+                                community char(50),
+                                room char(50),
+                                area char(50),
+                                build char(50),
+                                layer char(50),
+                                region char(100),
+                                title char(255),
+                                url char(100))'''.format(self.BASICTABLENAME)
+            self.cur.execute(s)
+
+        if (self.PRICETABLENAME,) not in res:
+            # create price table
+            s = '''create table {}(
+                                id BIGINT not null,
+                                date Date not null,
+                                total float,
+                                unitprice float,
+                                PRIMARY KEY(id,date))'''.format(self.PRICETABLENAME)
+            self.cur.execute(s)
+
+    def update(self):
+        s = 'select id from {}'.format(self.BASICTABLENAME)
+        self.cur.execute(s)
+        houseIds = self.cur.fetchall()
+
+        s = 'select id,date from {}'.format(self.PRICETABLENAME)
+        self.cur.execute(s)
+        priceItems = self.cur.fetchall()
+
+        today = datetime.date.today()
+
+        houseInfo = self.getAllHouseInfo()
+        # houseInfo = self.parseHouseInfo('http://bj.lianjia.com/ershoufang/101092222554.html')
+        # houseInfo = [houseInfo]
+        for house in houseInfo:
+            if (house['id'],) not in houseIds:
+                self.insertHouseInfo(house)
+
+            if (house['id'],today,) not in priceItems:
+                self.insertHousePrice(house)
+
+        self.conn.commit()
+        print('database updated!')
+
+    def insertHouseInfo(self,house):
+        s = '''insert {} values({},'{}','{}','{}','{}','{}','{}','{}','{}')'''.format(self.BASICTABLENAME,\
+                                                                                    house['id'],\
+                                                                                    house['community'],\
+                                                                                    house['room'],\
+                                                                                    house['area'],\
+                                                                                    house['build'],\
+                                                                                    house['layer'],\
+                                                                                    house['region'], \
+                                                                                    house['title'], \
+                                                                                    house['url'])
+        self.cur.execute(s)
+
+
+    def insertHousePrice(self,house):
+        today = datetime.date.today().strftime('%Y-%m-%d')
+        s = '''insert {} values({},'{}',{},{})'''.format(self.PRICETABLENAME,\
+                                                         house['id'], \
+                                                         today,\
+                                                         house['total'], \
+                                                         house['unit'])
+
+        self.cur.execute(s)
+
+
+
 
 
 
@@ -147,8 +253,10 @@ if __name__ == '__main__':
 
     # url = 'http://bj.lianjia.com/ershoufang/rs%E9%80%9A%E5%B7%9E'
     # url = 'http://bj.lianjia.com/ershoufang/pg92rs%E9%80%9A%E5%B7%9E/'
-    lianjia = Lianjia('tongzhou')
-    a = lianjia.parseHouseInfo('http://bj.lianjia.com/ershoufang/101092222554.html')
-    # lianjia.getAllHouseInfo()
+    # lianjia = Lianjia('tongzhou')
+    # a = lianjia.parseHouseInfo('http://bj.lianjia.com/ershoufang/101092222554.html')
+    # # lianjia.getAllHouseInfo()
 
 
+    l = LianjiaSql('tongzhou')
+    l.update()
