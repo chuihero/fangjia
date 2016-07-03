@@ -70,6 +70,10 @@ class Lianjia():
         pool = ThreadPool(THREADNUM)
         res = pool.map(self.parseHouseInfo, houseUrls)
 
+        #有可能页面返回错误，无法解析，得到None的结果，需把None删掉
+        while(None in res):
+            res.remove(None)
+
         return  res
 
     def parseHouseInfo(self,houseUrl):
@@ -97,7 +101,7 @@ class Lianjia():
             unitPriceText =(soup.find('div',class_='unitPrice')).span.get_text(' ')
             unitPrice = float((unitPriceText.split())[0])
 
-            title = soup.find('div',class_='title').text
+            title = ','.join((soup.find('div',class_='title').text).split())
             room = soup.find('div',class_='room').find('div',class_='mainInfo').text
 
             layer = soup.find('div',class_='room').find('div',class_='subInfo').text
@@ -105,15 +109,17 @@ class Lianjia():
             area = soup.find('div',class_='area').find('div',class_='mainInfo').text
             build = soup.find('div',class_='area').find('div',class_='subInfo').text
             communityName = soup.find('div',class_='communityName').find('a').text
-            region = soup.find('div',class_='areaName').find('span',class_='info').get_text(',')
-
+            regiontxt = soup.find('div',class_='areaName').find('span',class_='info').get_text(',').replace(',',' ').split()
+            region = regiontxt[0]
+            subRegion = regiontxt[1]
+            street = ','.join(regiontxt[2:])
             houseId = int(soup.find('div',class_='houseRecord').find('span',class_='info').get_text(',').split()[0])
 
             # return [totalPrice,unitPrice,title,room,layer,area,build,communityName,\
             #         region,houseId,houseUrl]
             return {'total':totalPrice,'unit':unitPrice,'title':title,'room':room,'layer':layer,\
                     'area':area,'build':build,'community':communityName,'region':region,\
-                    'id':houseId,'url':houseUrl}
+                    'subRegion':subRegion,'street':street,'id':houseId,'url':houseUrl}
         except:
 
 
@@ -121,7 +127,7 @@ class Lianjia():
             fh = open(filename,'w')
             fh.writelines(soup.prettify())
             fh.close
-            print('网页{}解析错误'.format(houseUrl))
+            print('网页{} 解析错误'.format(houseUrl))
 
     def writeHouseInfo(self,export='json'):
         pass;
@@ -172,7 +178,9 @@ class LianjiaSql(Lianjia):
                                 area char(50),
                                 build char(50),
                                 layer char(50),
-                                region char(100),
+                                region char(50),
+                                subRegion char(50),
+                                street char(100),
                                 title char(255),
                                 url char(100))'''.format(self.BASICTABLENAME)
             self.cur.execute(s)
@@ -212,7 +220,8 @@ class LianjiaSql(Lianjia):
         print('database updated!')
 
     def insertHouseInfo(self,house):
-        s = '''insert {} values({},'{}','{}','{}','{}','{}','{}','{}','{}')'''.format(self.BASICTABLENAME,\
+        s = '''insert {} values({},'{}','{}','{}','{}','{}','{}','{}','{}','{}','{}')'''.format(\
+                                                                                    self.BASICTABLENAME,\
                                                                                     house['id'],\
                                                                                     house['community'],\
                                                                                     house['room'],\
@@ -220,6 +229,8 @@ class LianjiaSql(Lianjia):
                                                                                     house['build'],\
                                                                                     house['layer'],\
                                                                                     house['region'], \
+                                                                                    house['subRegion'],\
+                                                                                    house['street'],\
                                                                                     house['title'], \
                                                                                     house['url'])
         self.cur.execute(s)
