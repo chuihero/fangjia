@@ -34,6 +34,7 @@ if __name__=='__main__':
         else:
             secondNeed = scheduleTime - now
 
+        print('------------------------------------->')
         print ('等待下次执行时间：%s秒'%secondNeed.seconds)
         time.sleep(secondNeed.seconds)
 
